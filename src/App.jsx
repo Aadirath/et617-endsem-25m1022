@@ -242,7 +242,7 @@ export default function App() {
               <button className="voiceBtn" onClick={numericVoice.start} disabled={numericVoice.listening}>
                 🎤 {numericVoice.listening ? 'Listening…' : 'Speak your answer'}
               </button>
-              <button className="primary" onClick={submitAnswer} disabled={numericAnswer === ''}>Submit</button>
+              <button className="primary" onClick={() => submitAnswer()} disabled={numericAnswer === ''}>Submit</button>
             </>
           )}
         </section>
