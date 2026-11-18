@@ -28,6 +28,8 @@ function useVoiceInput(onResult) {
   const [listening, setListening] = useState(false)
   const [error, setError] = useState(null)
   const [supported] = useState(() => 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window)
+  const recRef = useRef(null)
+  const timeoutRef = useRef(null)
 
   const start = useCallback(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
@@ -36,23 +38,37 @@ function useVoiceInput(onResult) {
     const rec = new SpeechRecognition()
     rec.lang = 'en-IN'
     rec.interimResults = false
+    rec.continuous = false
     rec.maxAlternatives = 1
     rec.onresult = (e) => onResult(e.results[0][0].transcript)
-    rec.onend = () => setListening(false)
+    rec.onend = () => {
+      setListening(false)
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    }
     rec.onerror = (e) => {
       setListening(false)
       setError(e.error || 'unknown')
+      if (timeoutRef.current) clearTimeout(timeoutRef.current)
     }
+    recRef.current = rec
     setListening(true)
     try {
       rec.start()
+      // Chrome can hang mid-listen without ever firing onend/onresult — force a stop after 12s so the UI never gets stuck.
+      timeoutRef.current = setTimeout(() => {
+        try { rec.stop() } catch { /* already stopped */ }
+      }, 12000)
     } catch {
       setListening(false)
       setError('unknown')
     }
   }, [onResult])
 
-  return { start, listening, supported, error }
+  const stop = useCallback(() => {
+    try { recRef.current?.stop() } catch { /* already stopped */ }
+  }, [])
+
+  return { start, stop, listening, supported, error }
 }
 
 function randInt(min, max) {
@@ -68,17 +84,37 @@ function shuffle(arr) {
   return a
 }
 
-function generateQuestion(tier) {
+// targetMisconception, when set, biases which sub-shape of question gets generated
+// within the current tier, so a diagnosed weakness is specifically re-exercised
+// rather than just retried with a random question of the same difficulty.
+function generateQuestion(tier, targetMisconception = null) {
   if (tier === 1) {
+    // 'add' (x + a = b, solved by subtracting) is where the sign-flip trap (M1) is most
+    // pronounced, so target it directly when that's the diagnosed weakness.
+    const variant = targetMisconception === 'm1-sign-flip' ? 'add' : (Math.random() < 0.5 ? 'add' : 'subtract')
     const a = randInt(2, 9)
     const x = randInt(1, 9)
+    if (variant === 'subtract') {
+      const b = x - a
+      const signFlipMistake = b - a // mistake: subtracting again instead of adding to isolate x
+      const options = shuffle([...new Set([x, signFlipMistake, x + 1, x - 1])]).slice(0, 4)
+      return {
+        tier, format: 'mcq',
+        equationText: `x - ${a} = ${b}`,
+        prompt: `Solve for x: x minus ${a} equals ${b}.`,
+        correctAnswer: x,
+        options: options.includes(x) ? options : [...options.slice(0, 3), x],
+      }
+    }
     const b = x + a
-    const signFlip = b + a // what you get if you add instead of subtract (M1)
-    const options = shuffle([...new Set([x, signFlip, x + 1, x - 1])]).slice(0, 4)
+    const signFlipMistake = b + a // mistake: adding instead of subtracting to isolate x
+    const options = shuffle([...new Set([x, signFlipMistake, x + 1, x - 1])]).slice(0, 4)
     return {
       tier, format: 'mcq',
       equationText: `x + ${a} = ${b}`,
-      prompt: `Solve for x: x plus ${a} equals ${b}.`,
+      prompt: targetMisconception === 'm1-sign-flip'
+        ? `Solve for x: x plus ${a} equals ${b}. Remember — when a term crosses the equals sign, its sign flips.`
+        : `Solve for x: x plus ${a} equals ${b}.`,
       correctAnswer: x,
       options: options.includes(x) ? options : [...options.slice(0, 3), x],
     }
@@ -95,7 +131,29 @@ function generateQuestion(tier) {
       correctAnswer: x,
     }
   }
-  // tier 3: variable on both sides
+  // tier 3: either 'distribute' (targets M2) or 'both-sides' (targets M1)
+  const useDistribute = targetMisconception === 'm2-distribution-balance'
+    ? true
+    : targetMisconception === 'm1-sign-flip'
+    ? false
+    : Math.random() < 0.5
+
+  if (useDistribute) {
+    const a = randInt(2, 4)
+    const x = randInt(1, 6)
+    const b = randInt(1, 5)
+    const c = a * (x + b)
+    const forgotToDistribute = Math.round((c - b) / a) // mistake: treats it as ax + b = c instead of ax + ab = c
+    const options = shuffle([...new Set([x, forgotToDistribute, x + 1, x - 1])]).slice(0, 4)
+    return {
+      tier, format: 'mcq',
+      equationText: `${a}(x + ${b}) = ${c}`,
+      prompt: `Solve for x: ${a} times, open bracket, x plus ${b}, close bracket, equals ${c}.`,
+      correctAnswer: x,
+      options: options.includes(x) ? options : [...options.slice(0, 3), x],
+    }
+  }
+
   const a = randInt(3, 6)
   const c = randInt(1, a - 1)
   const x = randInt(1, 6)
@@ -131,15 +189,23 @@ export default function App() {
   const [decision, setDecision] = useState(null) // { outcome, feedback, diagnosis }
   const [history, setHistory] = useState([])
   const [evaluating, setEvaluating] = useState(false)
+  const [questionStartTime, setQuestionStartTime] = useState(null)
+  const [elapsedMs, setElapsedMs] = useState(null)
+  const [lastDiagnosis, setLastDiagnosis] = useState(null)
+  const [misconceptionStreak, setMisconceptionStreak] = useState(0)
+  const [pendingTargetMisconception, setPendingTargetMisconception] = useState(null)
 
-  const beginQuestion = (t) => {
-    const q = generateQuestion(t)
+  const FAST_MS = 15000 // answering correctly within 15s counts as confident/fast
+
+  const beginQuestion = (t, targetMisconception = null) => {
+    const q = generateQuestion(t, targetMisconception)
     setQuestion(q)
     setNumericAnswer('')
     setNumericCorrect(null)
     setTranscript('')
     setExplanationText('')
     setDecision(null)
+    setQuestionStartTime(Date.now())
     setScreen('question')
     speak(q.prompt)
   }
@@ -157,6 +223,7 @@ export default function App() {
   const submitAnswer = (answerOverride) => {
     const ans = answerOverride !== undefined ? answerOverride : numericAnswer
     const correct = Number(ans) === question.correctAnswer
+    setElapsedMs(questionStartTime ? Date.now() - questionStartTime : null)
     setNumericAnswer(String(ans))
     setNumericCorrect(correct)
     setScreen('explain')
@@ -190,12 +257,31 @@ export default function App() {
     }
     setEvaluating(false)
 
-    let outcome
-    if (diagnosis === 'correct') outcome = 'harder'
-    else if (diagnosis === 'm1-sign-flip' || diagnosis === 'm2-distribution-balance') outcome = 'alt'
-    else outcome = 'prereq'
+    // A second signal beyond the diagnosis label: has this exact misconception shown up
+    // twice in a row? One occurrence gets a targeted re-explanation; a repeat means that
+    // re-explanation didn't land, so escalate to the prerequisite refresher instead of
+    // looping the same fix again.
+    const isMisconception = diagnosis === 'm1-sign-flip' || diagnosis === 'm2-distribution-balance'
+    const streak = isMisconception && diagnosis === lastDiagnosis ? misconceptionStreak + 1 : (isMisconception ? 1 : 0)
 
-    setHistory((h) => [...h, { tier: question.tier, equationText: question.equationText, numericCorrect, diagnosis, outcome }])
+    let outcome
+    let nextTarget = null
+    if (diagnosis === 'correct') {
+      // A third signal: correct but slow suggests the reasoning isn't solid yet, even
+      // though the diagnosis says it's sound — consolidate at the same tier once more
+      // rather than escalating immediately.
+      outcome = elapsedMs !== null && elapsedMs > FAST_MS ? 'consolidate' : 'harder'
+    } else if (isMisconception) {
+      outcome = streak >= 2 ? 'prereq' : 'alt'
+      nextTarget = diagnosis
+    } else {
+      outcome = 'prereq'
+    }
+
+    setLastDiagnosis(diagnosis)
+    setMisconceptionStreak(streak)
+    setPendingTargetMisconception(nextTarget)
+    setHistory((h) => [...h, { tier: question.tier, equationText: question.equationText, numericCorrect, diagnosis, outcome, elapsedMs }])
     setDecision({ outcome, feedback, diagnosis })
     setScreen('decision')
     speak(feedback)
@@ -206,8 +292,10 @@ export default function App() {
       const next = Math.min(tier + 1, MAX_TIER)
       setTier(next)
       beginQuestion(next)
-    } else if (decision.outcome === 'alt') {
+    } else if (decision.outcome === 'consolidate') {
       beginQuestion(tier)
+    } else if (decision.outcome === 'alt') {
+      beginQuestion(tier, pendingTargetMisconception)
     } else {
       setScreen('prereq')
       speak('Remember: subtracting a negative number is the same as adding. Minus minus three equals plus three. Let\'s try again.')
@@ -261,6 +349,9 @@ export default function App() {
               <button className="voiceBtn" onClick={numericVoice.start} disabled={numericVoice.listening}>
                 🎤 {numericVoice.listening ? 'Listening…' : 'Speak your answer'}
               </button>
+              {numericVoice.listening && (
+                <button className="primary" onClick={numericVoice.stop}>⏹ Done speaking</button>
+              )}
               {numericVoice.error && <p className="heard">{VOICE_ERROR_MESSAGES[numericVoice.error] || `Voice error: ${numericVoice.error}. Try typing instead.`}</p>}
               <button className="primary" onClick={() => submitAnswer()} disabled={numericAnswer === ''}>Submit</button>
             </>
@@ -277,6 +368,9 @@ export default function App() {
             <button className="voiceBtn" onClick={explainVoice.start} disabled={explainVoice.listening}>
               🎤 {explainVoice.listening ? 'Listening…' : 'Speak your explanation'}
             </button>
+          )}
+          {explainVoice.listening && (
+            <button className="primary" onClick={explainVoice.stop}>⏹ Done speaking</button>
           )}
           {explainVoice.error && <p className="heard">{VOICE_ERROR_MESSAGES[explainVoice.error] || `Voice error: ${explainVoice.error}. Try typing instead.`}</p>}
           <input
@@ -297,6 +391,7 @@ export default function App() {
           <h2>Here's what I noticed</h2>
           <div className={`decisionCard ${decision.outcome}`}>
             {decision.outcome === 'harder' && <p className="tag">→ Moving to a harder question</p>}
+            {decision.outcome === 'consolidate' && <p className="tag">→ Correct, but let's lock it in — one more at this level</p>}
             {decision.outcome === 'alt' && <p className="tag">→ Let's re-explain this one differently</p>}
             {decision.outcome === 'prereq' && <p className="tag">→ Quick refresher first</p>}
             <p>{decision.feedback}</p>
@@ -313,7 +408,7 @@ export default function App() {
           <button className="voiceBtn" onClick={() => speak('Subtracting a negative number is the same as adding. And when a term crosses the equals sign, it changes sign.')}>
             🔊 Read this aloud
           </button>
-          <button className="primary" onClick={() => beginQuestion(tier)}>Try again</button>
+          <button className="primary" onClick={() => beginQuestion(tier, pendingTargetMisconception)}>Try again</button>
         </section>
       )}
 
@@ -328,7 +423,7 @@ export default function App() {
               {history.map((h, i) => (
                 <div className="logRow" key={i}>
                   <span>T{h.tier}: {h.equationText}</span>
-                  <span>{h.diagnosis}</span>
+                  <span>{h.diagnosis}{h.elapsedMs != null ? ` · ${Math.round(h.elapsedMs / 1000)}s` : ''}</span>
                 </div>
               ))}
             </div>
