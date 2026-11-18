@@ -135,8 +135,10 @@ export default function App() {
     setExplanationText(text)
   })
 
-  const submitAnswer = () => {
-    const correct = Number(numericAnswer) === question.correctAnswer
+  const submitAnswer = (answerOverride) => {
+    const ans = answerOverride !== undefined ? answerOverride : numericAnswer
+    const correct = Number(ans) === question.correctAnswer
+    setNumericAnswer(String(ans))
     setNumericCorrect(correct)
     setScreen('explain')
     speak(correct ? 'Now tell me how you solved it.' : "That's not quite right — tell me how you worked it out anyway.")
@@ -220,7 +222,7 @@ export default function App() {
           {question.format === 'mcq' && (
             <div className="choices">
               {question.options.map((opt) => (
-                <button key={opt} className="choice" onClick={() => { setNumericAnswer(String(opt)); setTimeout(submitAnswer, 0) }}>
+                <button key={opt} className="choice" onClick={() => submitAnswer(opt)}>
                   x = {opt}
                 </button>
               ))}
