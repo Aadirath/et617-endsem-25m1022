@@ -1,110 +1,64 @@
-\# DESIGN.md — ET617 End-Sem, Roll 25M1022
+# DESIGN.md — ET617 End-Sem, Roll 25M1022
 
+**Card:** P4 (Adaptive tutor with automatic question generation) · T3 (Linear equations in one variable, Cl. 8) · L1 (rural govt-school learner) · C6 (Voice-first)
 
+> Note: an earlier version of this file was committed for card P1/T3 before the card was corrected to P4. T3 is defined per-problem in the exam's option bank, so correcting P to P4 also changes T3's actual topic (from "simple machines" under P1 to "linear equations in one variable" under P4). This file supersedes that earlier commit.
 
-\*\*Card:\*\* P1 (Context-aware visual learning app) · T3 (Simple machines in household objects, Cl. 6–9) · L1 (rural govt-school learner) · C6 (Voice-first)
-
-
-
-\## D1 — Educational problem
-
-Many Class 6–9 students in rural government schools can recite the six simple-machine names (lever, pulley, wheel-and-axle, inclined plane, wedge, screw) but cannot recognise them in the objects around their own home — a doorknob, a bottle-opener, a water hand-pump. The gap is between textbook vocabulary and situated recognition. This app asks the learner to point their phone camera at a household object; an AI vision model identifies the object and names which simple machine it is (or is closest to), and the app then teaches \*why\*, using voice for learners who find reading English UI slower than listening in their own language.
-
-
+## D1 — Educational problem
+Class 8 students are often taught the mechanical steps for solving `ax + b = c` style equations but apply them as memorised moves rather than balance operations — so when a step changes (a variable on both sides, or brackets to expand) the memorised move breaks down and produces a specific, recognisable wrong answer rather than a random one. A fixed worksheet can't tell *why* an answer is wrong or respond to it; this app watches both the learner's numeric answer and their spoken explanation of their own reasoning, diagnoses which specific misunderstanding (if any) produced the error, and adapts the next step accordingly — a harder question, a targeted re-explanation, or a prerequisite refresher.
 
 Learning outcomes:
+1. **Solve** one-step, two-step and variable-on-both-sides linear equations in one variable.
+2. **Explain**, in their own words (spoken), the balance operation they used at each step.
+3. **Recognise** two specific common errors in their own or a worked solution: a sign-flip error when moving a term across the equals sign, and an unbalanced/incomplete distribution error.
 
-1\. \*\*Identify\*\* a simple machine in a photographed household object.
+Context of use: at home, evening, ~10–15 min, on a shared Android phone, variable/weak network.
 
-2\. \*\*Explain\*\*, in their own words (spoken), why that object makes a task easier.
+## D2 — Learner persona
+**Sanjay Pawar**, 13, Class 8, government school (Marathi-medium) in rural Maharashtra. Uses his mother's Android phone for ~30 minutes most evenings after she returns from work. Prior knowledge: confident with one-step equations (`x + 3 = 7`) from Class 7, shaky on two-step and variable-on-both-sides equations introduced this year. Comfortable with voice notes on WhatsApp; slower and more reluctant at typing, especially explanations in English.
 
-3\. \*\*Distinguish\*\* two objects that look similar but use different simple-machine principles (e.g. a knife = wedge vs a screwdriver = wheel-and-axle).
+**Misconceptions:**
+- **M1 – Sign-flip error.** When moving a term across the equals sign, he forgets to change its sign — e.g. for `x + 3 = 7` he computes `x = 7 + 3` instead of `x = 7 - 3`.
+- **M2 – Distribution/balance error.** When a term must be distributed or an operation applied to both sides, he applies it to only one side or only part of an expression — e.g. for `2(x + 3) = 10` he writes `2x + 3 = 10` instead of `2x + 6 = 10`.
 
+## D3 — Educational content (one activity)
+Concept: solving linear equations by maintaining balance on both sides, tiered by difficulty (one-step → two-step → variable-on-both-sides), with the learner's spoken reasoning diagnosed after every question.
 
+Tasks (4 formats across the session):
+1. **Multiple-choice** — Tier 1, one-step equations (`x + a = b`).
+2. **Numeric entry** (typed or spoken) — Tier 2, two-step equations (`ax + b = c`).
+3. **Multiple-choice with targeted distractors** — Tier 3, variable-on-both-sides (`ax + b = cx + d`), where the wrong options are exactly the answers M1 and M2 would produce.
+4. **Open-response spoken explanation** — after every numeric/MCQ answer, "explain how you solved it" (always spoken-first, typed fallback), evaluated by AI for both correctness and misconception diagnosis.
 
-Context of use: at home, evening, \~10–15 min, on a shared Android phone, variable/weak network.
+Feedback (the three design-challenge outcomes — see D7):
+- Correct answer + sound reasoning → **harder question** (tier increases).
+- Wrong answer / explanation matches a named misconception → **alternative, targeted explanation**, same tier, try again.
+- Wrong answer / explanation too unclear to diagnose (no real step-by-step reasoning offered) → **prerequisite instruction** (a short refresher on signed-number arithmetic, the foundation under both M1 and M2), then retry at the same tier.
 
+## D4 — Working application
+6 connected screens/states: **Start → Question (3 answer formats across tiers) → Explain (spoken reasoning capture) → Decision (shows which of the 3 outcomes fired, and why) → Prerequisite refresher (only on that branch) → Progress/About**. Identity token `25M1022` in the footer of every screen and on the About screen.
 
+**C6 (Voice-first) implementation:** every question is read aloud via `speechSynthesis` on arrival; the numeric-entry format and the explanation step both accept spoken input via `SpeechRecognition`; every decision outcome is read aloud as well as shown on screen — a full spoken-input + spoken-output loop, not just a voice add-on to a text-first design.
 
-\## D2 — Learner persona
+## D6 — AI functionality specification
+**Feature: diagnosing a learner's spoken explanation of their own reasoning.**
+- Input to the model: the equation text, the correct answer, the learner's submitted numeric answer (and whether it was correct), and the learner's spoken explanation transcript.
+- Model: Gemini (text), called from a Vercel serverless function (`api/evaluate.js`) — key never exposed client-side.
+- Output: the model is asked for exactly one of four labels — `correct`, `m1-sign-flip`, `m2-distribution-balance`, `unclear` — plus one short feedback sentence.
+- Output check: the server validates the returned label is one of those four exact values; anything else (malformed JSON, an invented label, missing field) is treated as a failed call.
+- Fallback: if the API call fails, times out, or the label fails validation, the server does **not** guess — it returns `unclear` with a generic "let's slow down and look at this together" feedback line, which routes the learner down the prerequisite-instruction branch rather than ever showing a confident but unverified diagnosis.
 
-\*\*Sanjay Pawar\*\*, 12, Class 7, government school (Marathi-medium) in rural Maharashtra. Uses his mother's Android phone for \~30 minutes most evenings after she returns from work. Prior knowledge: can name the six simple machines from his textbook chart but has never been asked to find one in a real object. Comfortable with voice notes on WhatsApp; slower and reluctant at typing, especially in English.
+**Note on question generation:** the equations themselves (numbers, tier shape) are generated programmatically with randomised parameters appropriate to the current tier — this is the "automatic question generation" the problem asks for, driven by the learner's tier (itself driven by performance). The AI's role is specifically the harder, genuinely AI-shaped task: reading free-form spoken reasoning and diagnosing *which* misconception it reveals, which a template or regex cannot reliably do.
 
+## D7 — Pedagogical rationale (design challenge answer)
+**Decision rule:** after each question, the tutor looks at two signals together — numeric correctness and the explanation diagnosis — not numeric correctness alone (a correct number can hide a lucky guess, and the explanation is what actually reveals *why*).
+- If the explanation is diagnosed `correct` (whatever the numeric answer) → **harder question**: the only sound indicator of readiness to progress is correct reasoning, not just a correct number.
+- If the explanation is diagnosed `m1-sign-flip` or `m2-distribution-balance` → **alternative, targeted explanation** at the same tier: the learner has a specific, nameable misunderstanding, so the fix is to address that misunderstanding directly, not to re-teach the whole topic or escalate difficulty.
+- If the explanation is diagnosed `unclear` → **prerequisite instruction**: the learner can't yet articulate their own reasoning at all, which usually means the gap is a level below the current tier (signed-number arithmetic), not in the equation-solving procedure itself.
 
+This directly uses C6 (voice-first): Sanjay's real barrier for an "explain your reasoning" task is not whether he understands the maths, but whether he's willing/able to type an explanation in a non-native UI language — removing the typing step is what makes this diagnostic signal available at all for this learner.
 
-\*\*Misconceptions:\*\*
-
-\- \*\*M1 – "Simple machines are mechanical devices, not everyday objects."\*\* He expects a simple machine to look like a diagram from the textbook, not a bottle-opener or a doorknob.
-
-\- \*\*M2 – "A simple machine always reduces the effort needed, full stop."\*\* He doesn't yet distinguish force vs. distance trade-off.
-
-
-
-\## D3 — Educational content (one activity)
-
-Concept: a household object is examined, classified into one of the six simple machines, and the force/distance trade-off is explained in one spoken sentence + one visual before/after comparison.
-
-
-
-Tasks (5, two formats):
-
-1\. Photo-identify task — capture/upload a photo; AI names the object + machine type.
-
-2\. Spoken-prediction task — "Why do you think this makes the job easier?" (voice answer, matched against expected keywords).
-
-3\. Compare task — two objects (knife vs screwdriver) — pick which is a wedge.
-
-4\. Misconception-check MCQ — "A ramp needs less force because the box is lighter on a ramp. True/False?" (targets M2).
-
-5\. Second photo-identify task — different object, used as the post-check.
-
-
-
-Feedback:
-
-\- Correct → short voice confirmation + one extra "did you know" fact.
-
-\- M1 triggered → voice: "It doesn't need gears or wires to be one. A simple machine is any tool that changes the force or direction you need to apply."
-
-\- M2 triggered → voice: "You still do the same total work — simple machines let you trade force for distance, not remove the work."
-
-
-
-\## D4 — Working application
-
-5 connected screens/states: \*\*Capture → Identifying (loading) → Result (incl. misidentification/correction path) → Learning activity (voice prediction + feedback) → Practice/About\*\*. Identity token `25M1022` in the footer of every screen and on the About screen.
-
-
-
-\*\*C6 (Voice-first) implementation:\*\* the Result screen's explanation is read aloud via the Web Speech API (`speechSynthesis`); the Learning-activity prediction question is answered by spoken input via `SpeechRecognition`, transcribed, matched, and responded to with synthesized speech — a full spoken-input + spoken-output loop.
-
-
-
-\## D6 — AI functionality specification
-
-\*\*Feature: object → simple-machine identification.\*\*
-
-\- Input: a photo (base64 JPEG, client-compressed to <300KB) + a fixed prompt asking for `{object, machineType, confidence (0-1), explanation}` where `machineType` must be one of the 6 allowed values.
-
-\- Model: Gemini vision (multimodal), called from a Vercel serverless function (`api/identify.js`) — key never exposed client-side.
-
-\- Output check: server validates `machineType` is one of the 6 allowed enum values and `confidence` is a number; if either check fails, or confidence < 0.5, the response is relabelled `misidentified: true` \*\*before\*\* it reaches the learner.
-
-\- Fallback: on `misidentified: true`, API timeout, or API error, the app shows "I'm not sure what this is — can you tell me?" and accepts a spoken correction, which becomes the object name for the rest of the activity (this directly answers the P1 design challenge).
-
-
-
-\## D7 — Pedagogical rationale (design challenge answer)
-
-The P1 design challenge asks how AI interpretations stay accurate and what happens on misidentification. We answer this structurally: every AI response is checked against a closed enum server-side, and anything uncertain is always routed to the same honest "I'm not sure" + voice-correction screen, never silently shown as fact. C6 (voice-first) was chosen because Sanjay's real barrier isn't reading ability but comfort/speed in a non-native UI language; speaking a prediction lowers the cost of attempting an answer versus typing.
-
-
-
-\## D8 — Evaluation plan
-
-\- Assessment items: tasks 1–5 above, scored right/wrong against expected machine type/keywords.
-
-\- Log data: object photographed, AI-returned machine type + confidence, misidentification flag, spoken-answer transcript, M1/M2 trigger, time on task.
-
-\- Success criterion: ≥4/5 correct on post-check, and learner verbally states the force/distance trade-off unprompted.
-
+## D8 — Evaluation plan
+- Assessment items: the tier-1/2/3 question formats above, each auto-graded for numeric correctness; explanations graded by the AI diagnosis label.
+- Log data: per round — tier, equation, numeric answer, correct/incorrect, explanation transcript, diagnosis label, which of the 3 outcomes fired, time on task.
+- Success criterion: learner reaches Tier 3 within the session, and at least one `m1-sign-flip` or `m2-distribution-balance` instance is correctly resolved (i.e. the same misconception does not recur after its targeted explanation is shown).
