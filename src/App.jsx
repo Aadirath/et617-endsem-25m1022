@@ -251,17 +251,17 @@ export default function App() {
           <p className="tag">{numericCorrect ? 'Correct answer' : 'Not quite right'}</p>
           <h2>How did you work it out?</h2>
           <p>Explain your steps out loud, in your own words.</p>
-          <button className="voiceBtn" onClick={explainVoice.start} disabled={explainVoice.listening}>
-            🎤 {explainVoice.listening ? 'Listening…' : 'Speak your explanation'}
-          </button>
-          {!explainVoice.supported && (
-            <input
-              className="numericInput"
-              placeholder="Or type your explanation here"
-              value={explanationText}
-              onChange={(e) => setExplanationText(e.target.value)}
-            />
+          {explainVoice.supported && (
+            <button className="voiceBtn" onClick={explainVoice.start} disabled={explainVoice.listening}>
+              🎤 {explainVoice.listening ? 'Listening…' : 'Speak your explanation'}
+            </button>
           )}
+          <input
+            className="numericInput"
+            placeholder="Or type your explanation here"
+            value={explanationText}
+            onChange={(e) => setExplanationText(e.target.value)}
+          />
           {transcript && <p className="heard">Heard: "{transcript}"</p>}
           <button className="primary" onClick={submitExplanation} disabled={!explanationText || evaluating}>
             {evaluating ? 'Checking…' : 'Submit explanation'}
