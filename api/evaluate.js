@@ -13,7 +13,7 @@ export default async function handler(req, res) {
   const ALLOWED = ['correct', 'm1-sign-flip', 'm2-distribution-balance', 'unclear']
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
-    res.status(200).json({ diagnosis: 'unclear', feedback: "Let's slow down and look at this one together." })
+    res.status(200).json({ diagnosis: 'unclear', feedback: "Let's slow down and look at this one together.", reason: 'no-key' })
     return
   }
 
@@ -29,7 +29,7 @@ Classify this into exactly one of these four labels:
 Reply with ONLY compact JSON: {"diagnosis":"...", "feedback":"one short encouraging sentence for a 13-year-old, in simple English, addressing their specific reasoning"}.`
 
     const r = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${apiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
