@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import './App.css'
 
 const ROLL_NO = '25M1022'
@@ -15,25 +15,44 @@ function speak(text) {
   }
 }
 
+const VOICE_ERROR_MESSAGES = {
+  'not-allowed': 'Microphone access is blocked for this site. Click the padlock icon in your address bar → Site settings → Microphone → Allow, then reload the page.',
+  'service-not-allowed': 'Microphone access is blocked for this site. Click the padlock icon in your address bar → Site settings → Microphone → Allow, then reload the page.',
+  'no-speech': "Didn't catch anything — try speaking again, a bit closer to the mic.",
+  'audio-capture': 'No microphone was found on this device.',
+  'network': 'Speech recognition needs a network connection and one dropped — try again, or type instead.',
+  'aborted': 'Listening stopped early — try again.',
+}
+
 function useVoiceInput(onResult) {
   const [listening, setListening] = useState(false)
+  const [error, setError] = useState(null)
   const [supported] = useState(() => 'webkitSpeechRecognition' in window || 'SpeechRecognition' in window)
 
   const start = useCallback(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
     if (!SpeechRecognition) return
+    setError(null)
     const rec = new SpeechRecognition()
     rec.lang = 'en-IN'
     rec.interimResults = false
     rec.maxAlternatives = 1
     rec.onresult = (e) => onResult(e.results[0][0].transcript)
     rec.onend = () => setListening(false)
-    rec.onerror = () => setListening(false)
+    rec.onerror = (e) => {
+      setListening(false)
+      setError(e.error || 'unknown')
+    }
     setListening(true)
-    rec.start()
+    try {
+      rec.start()
+    } catch {
+      setListening(false)
+      setError('unknown')
+    }
   }, [onResult])
 
-  return { start, listening, supported }
+  return { start, listening, supported, error }
 }
 
 function randInt(min, max) {
@@ -242,6 +261,7 @@ export default function App() {
               <button className="voiceBtn" onClick={numericVoice.start} disabled={numericVoice.listening}>
                 🎤 {numericVoice.listening ? 'Listening…' : 'Speak your answer'}
               </button>
+              {numericVoice.error && <p className="heard">{VOICE_ERROR_MESSAGES[numericVoice.error] || `Voice error: ${numericVoice.error}. Try typing instead.`}</p>}
               <button className="primary" onClick={() => submitAnswer()} disabled={numericAnswer === ''}>Submit</button>
             </>
           )}
@@ -258,6 +278,7 @@ export default function App() {
               🎤 {explainVoice.listening ? 'Listening…' : 'Speak your explanation'}
             </button>
           )}
+          {explainVoice.error && <p className="heard">{VOICE_ERROR_MESSAGES[explainVoice.error] || `Voice error: ${explainVoice.error}. Try typing instead.`}</p>}
           <input
             className="numericInput"
             placeholder="Or type your explanation here"
