@@ -48,17 +48,28 @@ Feedback (the three design-challenge outcomes — see D7):
 - Output check: the server validates the returned label is one of those four exact values; anything else (malformed JSON, an invented label, missing field) is treated as a failed call.
 - Fallback: if the API call fails, times out, or the label fails validation, the server does **not** guess — it returns `unclear` with a generic "let's slow down and look at this together" feedback line, which routes the learner down the prerequisite-instruction branch rather than ever showing a confident but unverified diagnosis.
 
-**Note on question generation:** the equations themselves (numbers, tier shape) are generated programmatically with randomised parameters appropriate to the current tier — this is the "automatic question generation" the problem asks for, driven by the learner's tier (itself driven by performance). The AI's role is specifically the harder, genuinely AI-shaped task: reading free-form spoken reasoning and diagnosing *which* misconception it reveals, which a template or regex cannot reliably do.
+**Note on question generation:** the equations themselves are generated programmatically with randomised parameters, but — importantly — the *shape* of the next question is also chosen by the diagnosis: after `m1-sign-flip`, the next question is a sign-flip-prone one-step/both-sides form; after `m2-distribution-balance`, the next question is a bracket/distribution form (`a(x+b)=c`) that specifically re-exercises that skill, rather than a random question of the same difficulty. The AI's role is the genuinely AI-shaped task — reading free-form spoken reasoning and diagnosing *which* misconception it reveals, which a template or regex cannot reliably do — and that single label then drives both the next question's shape and the branching below.
 
 ## D7 — Pedagogical rationale (design challenge answer)
-**Decision rule:** after each question, the tutor looks at two signals together — numeric correctness and the explanation diagnosis — not numeric correctness alone (a correct number can hide a lucky guess, and the explanation is what actually reveals *why*).
-- If the explanation is diagnosed `correct` (whatever the numeric answer) → **harder question**: the only sound indicator of readiness to progress is correct reasoning, not just a correct number.
-- If the explanation is diagnosed `m1-sign-flip` or `m2-distribution-balance` → **alternative, targeted explanation** at the same tier: the learner has a specific, nameable misunderstanding, so the fix is to address that misunderstanding directly, not to re-teach the whole topic or escalate difficulty.
-- If the explanation is diagnosed `unclear` → **prerequisite instruction**: the learner can't yet articulate their own reasoning at all, which usually means the gap is a level below the current tier (signed-number arithmetic), not in the equation-solving procedure itself.
+**Decision rule:** the tutor adapts on four signals together, not numeric correctness alone (a correct number can hide a lucky guess, and the explanation is what actually reveals *why*):
+
+1. **Numeric correctness** — was the answer right?
+2. **Explanation diagnosis** (AI-labelled: `correct` / `m1-sign-flip` / `m2-distribution-balance` / `unclear`) — the primary driver of the branch below.
+3. **Response time** — correct-and-fast (under 15s) is treated as confident mastery; correct-but-slow is treated as not yet solid, even though the diagnosis says the reasoning was sound.
+4. **Misconception streak** — whether the *same* misconception was just diagnosed twice in a row, meaning a targeted re-explanation already failed to land once.
+
+Branching:
+- `correct`, answered quickly → **harder question** (tier increases).
+- `correct`, answered slowly → **consolidate**: one more question at the *same* tier before advancing, since speed is a second signal of solidity beyond just being right.
+- `m1-sign-flip` or `m2-distribution-balance`, first occurrence → **targeted re-explanation** at the same tier, and the *next question's shape* is deliberately chosen to re-exercise that exact skill (see D6).
+- The same misconception a second time in a row → **escalate to prerequisite instruction** instead of repeating the same fix, since one re-explanation clearly wasn't enough.
+- `unclear` → **prerequisite instruction**: the learner can't yet articulate their own reasoning at all, which usually means the gap is a level below the current tier (signed-number arithmetic), not in the equation-solving procedure itself.
 
 This directly uses C6 (voice-first): Sanjay's real barrier for an "explain your reasoning" task is not whether he understands the maths, but whether he's willing/able to type an explanation in a non-native UI language — removing the typing step is what makes this diagnostic signal available at all for this learner.
 
+**On "same questions for everyone":** the tier structure (one-step → two-step → variable-on-both-sides/distribution) is shared scaffolding, matching a real curriculum progression — it is not infinitely unique per learner, and this is an intentional scope decision, not an oversight. What *is* personalised per learner is the path through that structure (how many rounds at each tier, which sub-shape of question appears, whether a prerequisite detour happens at all) and the specific numbers in every question, which are randomised on every generation and never repeat identically.
+
 ## D8 — Evaluation plan
 - Assessment items: the tier-1/2/3 question formats above, each auto-graded for numeric correctness; explanations graded by the AI diagnosis label.
-- Log data: per round — tier, equation, numeric answer, correct/incorrect, explanation transcript, diagnosis label, which of the 3 outcomes fired, time on task.
-- Success criterion: learner reaches Tier 3 within the session, and at least one `m1-sign-flip` or `m2-distribution-balance` instance is correctly resolved (i.e. the same misconception does not recur after its targeted explanation is shown).
+- Log data: per round — tier, equation, numeric answer, correct/incorrect, explanation transcript, diagnosis label, response time, which of the four outcomes fired (harder/consolidate/alt/prereq), and the misconception streak count.
+- Success criterion: learner reaches Tier 3 within the session, and at least one `m1-sign-flip` or `m2-distribution-balance` instance is correctly resolved (i.e. the same misconception does not recur after its targeted explanation and targeted follow-up question are shown).
